@@ -1,0 +1,25 @@
+# Dependencies
+**/node_modules
+**/__pycache__
+**/.venv
+**/dist
+
+# Environment
+**/.env
+**/.env.local
+
+# Build
+**/build
+**/*.pyc
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
+**/logs
+*.log
+
+# MongoDB
+**/data/db
