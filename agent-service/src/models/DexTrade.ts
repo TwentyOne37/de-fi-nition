@@ -61,3 +61,4 @@ export const DexTradeModel = mongoose.model<DexTradeDocument>(
 );
 
 DexTradeModel.createIndexes().catch(console.error);
+export { DexTrade };
