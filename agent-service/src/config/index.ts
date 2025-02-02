@@ -3,6 +3,8 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+export const DEFAULT_EXPIRATION_DAYS = 30;
+
 const configSchema = z.object({
   PORT: z.string().default("3000"),
   MONGODB_URI: z.string(),
