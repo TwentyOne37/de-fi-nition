@@ -8,6 +8,7 @@
     "start": "node dist/index.js",
     "dev": "ts-node-dev -r tsconfig-paths/register src/index.ts",
     "test": "jest",
+    "test-db": "ts-node -r tsconfig-paths/register src/scripts/test-db.ts",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write \"src/**/*.ts\""
   },

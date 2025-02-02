@@ -3,7 +3,6 @@ import logger from "./logger";
 import config from "../config";
 
 export async function connectDatabase(): Promise<void> {
-  // Force close any existing connections
   if (mongoose.connection.readyState !== 0) {
     await mongoose.disconnect();
   }

@@ -23,3 +23,6 @@
 
 # MongoDB
 **/data/db
+
+# NPM
+package-lock.json
