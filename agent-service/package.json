@@ -9,6 +9,7 @@
     "dev": "ts-node-dev -r tsconfig-paths/register src/index.ts",
     "test": "jest",
     "test-db": "ts-node -r tsconfig-paths/register src/scripts/test-db.ts",
+    "test-agents": "ts-node -r tsconfig-paths/register src/scripts/test-agents.ts",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write \"src/**/*.ts\""
   },

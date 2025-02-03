@@ -1,81 +1,51 @@
 // src/agents/collector/index.ts
-import { Agent } from "@covalenthq/ai-agent-sdk";
 import { GoldRushClient } from "@covalenthq/client-sdk";
-import { createTool } from "@covalenthq/ai-agent-sdk";
-import { z } from "zod";
 import { BaseAgent } from "../interfaces/base-agent";
 import { DexTrade, CollectorInput } from "../../types";
-import { BASE_DEX_ADDRESSES } from "@/config/dex/base";
+import { BASE_DEX_ADDRESSES, getAllDexRouters } from "@/config/dex/base";
+import logger from "@/services/logger";
 
-export class TradeCollectorAgent implements BaseAgent {
-  private agent: Agent;
+export class TradeCollectorAgent
+  implements BaseAgent<CollectorInput, DexTrade[]>
+{
   private goldRushClient: GoldRushClient;
   public readonly name = "TradeCollector";
   public readonly description = "Collect DEX trades from Base chain";
 
   constructor(apiKey: string) {
+    logger.info("Initializing TradeCollectorAgent");
     this.goldRushClient = new GoldRushClient(apiKey);
-
-    this.agent = new Agent({
-      name: this.name,
-      model: {
-        provider: "OPEN_AI",
-        name: "gpt-4o-mini",
-      },
-      description: this.description,
-      tools: {
-        fetchDexTrades: createTool({
-          id: "fetch-dex-trades",
-          description: "Fetch and format DEX trades",
-          schema: z.object({
-            walletAddress: z.string(),
-            startTime: z.number().optional(),
-            endTime: z.number().optional(),
-          }),
-          execute: async (params) => {
-            try {
-              const txs =
-                await this.goldRushClient.TransactionService.getAllTransactionsForAddressByPage(
-                  "base-mainnet",
-                  params.walletAddress,
-                  {
-                    noLogs: false,
-                    blockSignedAtAsc: true,
-                  }
-                );
-
-              const trades = this.transformTrades(txs?.data?.items || []);
-              // Tool must return string
-              return JSON.stringify({ success: true, trades });
-            } catch (error) {
-              return JSON.stringify({
-                success: false,
-                error: error instanceof Error ? error.message : "Unknown error",
-              });
-            }
-          },
-        }),
-      },
-    });
+    logger.info("TradeCollectorAgent initialized");
   }
 
   private isDexTransaction(tx: any): boolean {
-    const dexAddresses = [
-      BASE_DEX_ADDRESSES.uniswapV3.router.toLowerCase(),
-      BASE_DEX_ADDRESSES.aerodrome.router.toLowerCase(),
-    ];
-    return dexAddresses.includes(tx.to_address.toLowerCase());
+    const dexAddresses = getAllDexRouters();
+    const isDex = dexAddresses.includes(tx.to_address?.toLowerCase());
+
+    if (isDex) {
+      logger.debug(`Found DEX transaction: ${tx.tx_hash}`);
+    }
+
+    return isDex;
   }
 
   private identifyDex(tx: any): string {
     const toAddress = tx.to_address.toLowerCase();
 
-    if (toAddress === BASE_DEX_ADDRESSES.uniswapV3.router.toLowerCase()) {
+    if (
+      [
+        BASE_DEX_ADDRESSES.uniswapV3.router.toLowerCase(),
+        BASE_DEX_ADDRESSES.uniswapV3.swapRouter02.toLowerCase(),
+        BASE_DEX_ADDRESSES.uniswapV3.universalRouter.toLowerCase(),
+      ].includes(toAddress)
+    ) {
       return "uniswap_v3";
     }
-
     if (toAddress === BASE_DEX_ADDRESSES.aerodrome.router.toLowerCase()) {
       return "aerodrome";
+    }
+    if (toAddress === BASE_DEX_ADDRESSES.baseswap.router.toLowerCase()) {
+      return "baseswap";
     }
 
     return "unknown";
@@ -86,34 +56,37 @@ export class TradeCollectorAgent implements BaseAgent {
     symbol: string;
     amount: string;
   } {
-    // Basic implementation looking at decoded logs
+    logger.debug(`Extracting token in for transaction: ${tx.tx_hash}`);
     const logs = tx.log_events || [];
 
     for (const log of logs) {
-      // Check for Transfer event to router (indicates token in)
       if (
         log.decoded?.name === "Transfer" &&
         log.decoded?.params &&
         log.decoded.params[1]?.value?.toLowerCase() ===
           tx.to_address.toLowerCase()
       ) {
-        return {
+        const token = {
           address: log.sender_address,
           symbol: log.sender_contract_ticker_symbol || "UNKNOWN",
           amount: log.decoded.params[2]?.value || "0",
         };
+        logger.debug(`Found token in:`, token);
+        return token;
       }
     }
 
-    // If no token transfer found, might be native ETH
     if (tx.value && tx.value !== "0") {
-      return {
+      const token = {
         address: "0x0000000000000000000000000000000000000000",
         symbol: "ETH",
         amount: tx.value,
       };
+      logger.debug(`Found native ETH as token in:`, token);
+      return token;
     }
 
+    logger.debug(`No token in found for transaction: ${tx.tx_hash}`);
     return {
       address: "",
       symbol: "",
@@ -126,24 +99,27 @@ export class TradeCollectorAgent implements BaseAgent {
     symbol: string;
     amount: string;
   } {
+    logger.debug(`Extracting token out for transaction: ${tx.tx_hash}`);
     const logs = tx.log_events || [];
 
     for (const log of logs) {
-      // Check for Transfer event from router (indicates token out)
       if (
         log.decoded?.name === "Transfer" &&
         log.decoded?.params &&
         log.decoded.params[0]?.value?.toLowerCase() ===
           tx.to_address.toLowerCase()
       ) {
-        return {
+        const token = {
           address: log.sender_address,
           symbol: log.sender_contract_ticker_symbol || "UNKNOWN",
           amount: log.decoded.params[2]?.value || "0",
         };
+        logger.debug(`Found token out:`, token);
+        return token;
       }
     }
 
+    logger.debug(`No token out found for transaction: ${tx.tx_hash}`);
     return {
       address: "",
       symbol: "",
@@ -152,13 +128,16 @@ export class TradeCollectorAgent implements BaseAgent {
   }
 
   private transformTrades(txs: any[]): DexTrade[] {
-    return txs
-      .filter((tx) => this.isDexTransaction(tx))
+    const dexTxs = txs.filter((tx) => this.isDexTransaction(tx));
+    logger.info(
+      `Processing ${dexTxs.length} DEX transactions out of ${txs.length} total transactions`
+    );
+
+    const trades = dexTxs
       .map((tx) => {
         const tokenIn = this.extractTokenIn(tx);
         const tokenOut = this.extractTokenOut(tx);
 
-        // Only include transactions where we successfully identified both tokens
         if (!tokenIn.address || !tokenOut.address) {
           return null;
         }
@@ -174,34 +153,44 @@ export class TradeCollectorAgent implements BaseAgent {
         };
       })
       .filter((trade): trade is DexTrade => trade !== null);
+
+    logger.info(`Successfully processed ${trades.length} valid trades`);
+    return trades;
   }
 
   async run(input: CollectorInput): Promise<DexTrade[]> {
-    const result = await this.agent.run({
-      agent: this.name,
-      messages: [
-        {
-          role: "user",
-          content: "Fetch DEX trades for the given wallet",
-        },
-      ],
-      status: "running",
-      children: [],
-    });
+    logger.info("Starting trade collection", input);
 
     try {
-      const lastMessage = result.messages[result.messages.length - 1].content;
-      if (typeof lastMessage !== "string") {
-        throw new Error("Invalid message format");
+      const txs =
+        await this.goldRushClient.TransactionService.getAllTransactionsForAddressByPage(
+          "base-mainnet",
+          input.walletAddress,
+          {
+            noLogs: false,
+            blockSignedAtAsc: true,
+          }
+        );
+
+      logger.debug("Raw response from GoldRush:", txs);
+
+      if (!txs?.data?.items) {
+        logger.error("Invalid response structure from GoldRush", { txs });
+        throw new Error("Invalid response from blockchain data provider");
       }
-      const toolResult = JSON.parse(lastMessage);
-      if (!toolResult.success) {
-        throw new Error(toolResult.error);
-      }
-      return toolResult.trades;
+
+      const trades = this.transformTrades(txs.data.items);
+      logger.info(`Collection completed - found ${trades.length} trades`);
+
+      return trades;
     } catch (error) {
+      logger.error("Trade collection failed", {
+        error: error instanceof Error ? error.message : "Unknown error",
+        errorObject: error,
+        input,
+      });
       throw new Error(
-        `Failed to process trades: ${error instanceof Error ? error.message : "Unknown error"}`
+        `Failed to collect trades: ${error instanceof Error ? error.message : "Unknown error"}`
       );
     }
   }

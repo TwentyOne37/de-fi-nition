@@ -1,4 +1,3 @@
-// src/agents/interfaces/base-agent.ts
 import { z } from "zod";
 import { CollectorInput } from "@/types";
 import { DexTrade } from "@/models/DexTrade";
@@ -20,10 +19,10 @@ export interface AgentResult<T> {
   };
 }
 
-export interface BaseAgent {
+export interface BaseAgent<TInput = CollectorInput, TOutput = DexTrade[]> {
   name: string;
   description: string;
-  run(input: CollectorInput): Promise<DexTrade[]>;
+  run(input: TInput): Promise<TOutput>;
 }
 
 // Example implementation of basic validation

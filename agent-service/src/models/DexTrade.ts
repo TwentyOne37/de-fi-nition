@@ -34,7 +34,7 @@ const dexTradeSchema = new Schema({
 
 dexTradeSchema.index({ walletAddress: 1 });
 dexTradeSchema.index({ timestamp: 1 });
-dexTradeSchema.index({ txHash: 1 }, { unique: true, background: true });
+dexTradeSchema.index({ txHash: 1 }, { unique: true });
 dexTradeSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 dexTradeSchema.methods.toJSON = function () {

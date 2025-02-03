@@ -1,8 +1,7 @@
 import winston from "winston";
-import config from "../config";
 
 const logger = winston.createLogger({
-  level: config.LOG_LEVEL,
+  level: "info",
   format: winston.format.combine(
     winston.format.timestamp(),
     winston.format.json()
@@ -14,6 +13,8 @@ const logger = winston.createLogger({
         winston.format.simple()
       ),
     }),
+    new winston.transports.File({ filename: "error.log", level: "error" }),
+    new winston.transports.File({ filename: "combined.log" }),
   ],
 });
 
