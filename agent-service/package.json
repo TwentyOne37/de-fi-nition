@@ -11,6 +11,7 @@
     "test-db": "ts-node -r tsconfig-paths/register src/scripts/test-db.ts",
     "test-collector-agent": "ts-node -r tsconfig-paths/register src/scripts/test-collector-agent.ts",
     "test-store-agent": "ts-node -r tsconfig-paths/register src/scripts/test-store-agent.ts",
+    "test-enrichment-agent": "ts-node -r tsconfig-paths/register src/scripts/test-enrichment-agent.ts",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write \"src/**/*.ts\""
   },
