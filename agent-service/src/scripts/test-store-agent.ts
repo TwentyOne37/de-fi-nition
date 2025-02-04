@@ -1,10 +1,15 @@
-// src/scripts/store-trades.ts
 import { DexTradeModel } from "@/models/DexTrade";
 import { TradeCollectorAgent } from "../agents/collector";
 import { TradeStorageAgent } from "../agents/storage";
 import { connectDatabase } from "../services/database";
 import logger from "../services/logger";
 import config from "@/config";
+
+const formatAmount = (amount: string, symbol: string): string => {
+  const decimals = symbol === "USDC" ? 6 : 18;
+  const num = Number(amount) / Math.pow(10, decimals);
+  return `${num.toFixed(4)} ${symbol}`;
+};
 
 async function main() {
   try {
@@ -18,37 +23,43 @@ async function main() {
     const testWallet = "0xf1D3d73a34f917291cDdf07fE7c8bE874c55EC16";
     logger.info(`Fetching trades for wallet: ${testWallet}`);
 
-    // Collect trades
+    // Collect trades for the last 24 hours
+    const startTime = Date.now() - 24 * 60 * 60 * 1000;
     const trades = await collector.run({
       walletAddress: testWallet,
-      startTime: Date.now() - 24 * 60 * 60 * 1000,
+      startTime,
     });
 
     logger.info(`Found ${trades.length} trades, storing in database...`);
 
     // Store trades
     const result = await storage.run(trades);
-
     logger.info("Storage complete", {
       success: result.success,
       stored: result.stored,
     });
 
-    // Optional: Print summary of stored trades
+    // Query stored trades with proper time range
     const storedTrades = await DexTradeModel.find({
-      walletAddress: testWallet,
-      timestamp: { $gte: Date.now() - 24 * 60 * 60 * 1000 },
+      walletAddress: testWallet.toLowerCase(),
+      timestamp: { $gte: startTime },
     }).sort({ timestamp: -1 });
 
     console.log("\n=== Storage Summary ===");
     console.log(`Total trades stored: ${storedTrades.length}`);
-    console.log(`Latest trades in DB:`);
-    storedTrades.slice(0, 5).forEach((trade) => {
-      console.log(
-        `  ${new Date(trade.timestamp).toISOString().split("T")[0]} | ` +
-          `${trade.dex} | ${trade.txHash.slice(0, 10)}...`
-      );
-    });
+
+    if (storedTrades.length > 0) {
+      console.log("\nLatest trades in DB:");
+      storedTrades.slice(0, 5).forEach((trade) => {
+        const date = new Date(trade.timestamp).toISOString().split("T")[0];
+        console.log(
+          `  ${date} | ${trade.dex} | ` +
+            `${formatAmount(trade.tokenIn.amount, trade.tokenIn.symbol)} → ` +
+            `${formatAmount(trade.tokenOut.amount, trade.tokenOut.symbol)} | ` +
+            `${trade.txHash.slice(0, 10)}...`
+        );
+      });
+    }
 
     process.exit(0);
   } catch (error) {

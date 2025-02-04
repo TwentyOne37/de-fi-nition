@@ -1,4 +1,3 @@
-// src/scripts/test-agents.ts
 import { DexTrade } from "@/models/DexTrade";
 import { TradeCollectorAgent } from "../agents/collector";
 import logger from "../services/logger";

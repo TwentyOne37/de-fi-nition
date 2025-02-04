@@ -1,5 +1,6 @@
 import mongoose, { Schema, Document } from "mongoose";
 import { DexTrade } from "@/types";
+import logger from "@/services/logger";
 
 const DEFAULT_EXPIRATION_DAYS = 365;
 
@@ -32,10 +33,35 @@ const dexTradeSchema = new Schema({
   },
 });
 
-dexTradeSchema.index({ walletAddress: 1 });
-dexTradeSchema.index({ timestamp: 1 });
-dexTradeSchema.index({ txHash: 1 }, { unique: true });
-dexTradeSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+// Remove existing indexes first
+const setupIndexes = async () => {
+  try {
+    const model = mongoose.model<DexTradeDocument>("DexTrade", dexTradeSchema);
+
+    // Drop all indexes except _id
+    await model.collection.dropIndexes();
+
+    // Create new indexes
+    await model.collection.createIndexes([
+      { key: { walletAddress: 1 } },
+      { key: { timestamp: 1 } },
+      { key: { txHash: 1 }, unique: true, background: true },
+      { key: { expiresAt: 1 }, expireAfterSeconds: 0 },
+    ]);
+
+    logger.info("DexTrade indexes created successfully");
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("E11000")) {
+      logger.warn(
+        "Duplicate key found during index creation, indexes may already exist"
+      );
+    } else {
+      logger.error("Error creating indexes", {
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
+};
 
 dexTradeSchema.methods.toJSON = function () {
   const obj = this.toObject();
@@ -60,5 +86,10 @@ export const DexTradeModel = mongoose.model<DexTradeDocument>(
   dexTradeSchema
 );
 
-DexTradeModel.createIndexes().catch(console.error);
+// Initialize indexes
+setupIndexes().catch((error) => {
+  logger.error("Failed to setup indexes", {
+    error: error instanceof Error ? error.message : "Unknown error",
+  });
+});
 export { DexTrade };

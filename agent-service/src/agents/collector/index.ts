@@ -4,6 +4,7 @@ import { BaseAgent } from "../interfaces/base-agent";
 import { DexTrade, CollectorInput } from "../../types";
 import { BASE_DEX_ADDRESSES, getAllDexRouters } from "@/config/dex/base";
 import logger from "@/services/logger";
+import { Agent } from "@covalenthq/ai-agent-sdk";
 
 export class TradeCollectorAgent
   implements BaseAgent<CollectorInput, DexTrade[]>
@@ -11,11 +12,24 @@ export class TradeCollectorAgent
   private goldRushClient: GoldRushClient;
   public readonly name = "TradeCollector";
   public readonly description = "Collect DEX trades from Base chain";
+  protected readonly _agent: Agent;
 
   constructor(apiKey: string) {
     logger.info("Initializing TradeCollectorAgent");
+    this._agent = new Agent({
+      name: this.name,
+      model: {
+        provider: "OPEN_AI",
+        name: "gpt-4o-mini",
+      },
+      description: this.description,
+    });
     this.goldRushClient = new GoldRushClient(apiKey);
     logger.info("TradeCollectorAgent initialized");
+  }
+
+  public getAgent(): Agent {
+    return this._agent;
   }
 
   private isDexTransaction(tx: any): boolean {
