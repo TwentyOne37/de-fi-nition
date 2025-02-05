@@ -39,3 +39,4 @@ export const RelatedEventModel = mongoose.model<RelatedEventDocument>(
 );
 
 RelatedEventModel.createIndexes().catch(console.error);
+export { RelatedEvent };

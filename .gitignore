@@ -26,3 +26,7 @@
 
 # NPM
 package-lock.json
+
+coverage
++.DS_Store
++**/.DS_Store 

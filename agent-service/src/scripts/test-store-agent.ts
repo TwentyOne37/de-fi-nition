@@ -24,7 +24,7 @@ async function main() {
     logger.info(`Fetching trades for wallet: ${testWallet}`);
 
     // Collect trades for the last 24 hours
-    const startTime = Date.now() - 24 * 60 * 60 * 1000;
+    const startTime = Date.now() - 7 * 24 * 60 * 60 * 1000;
     const trades = await collector.run({
       walletAddress: testWallet,
       startTime,
