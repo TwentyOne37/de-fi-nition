@@ -1,4 +1,3 @@
-// src/agents/event-collector/index.ts
 import { Agent } from "@covalenthq/ai-agent-sdk";
 import { BaseAgent } from "../interfaces/base-agent";
 import { DexTrade } from "@/models/DexTrade";
@@ -12,9 +11,22 @@ interface NewsSource {
 }
 
 interface EventCollectorConfig {
-  minTradeValueUSD: number; // Only collect events for significant trades
-  timeWindowHours: number; // Look for events within this window
+  minTradeValueUSD: number;
+  timeWindowHours: number;
   sources: NewsSource[];
+}
+
+interface CryptoPanicNews {
+  kind: string;
+  domain: string;
+  title: string;
+  published_at: string;
+  url: string;
+  currencies: Array<{ code: string; title: string; slug: string }>;
+}
+
+interface CryptoPanicResponse {
+  results: CryptoPanicNews[];
 }
 
 export class EventCollectorAgent
@@ -24,18 +36,23 @@ export class EventCollectorAgent
   public readonly description = "Collect relevant news and events for trades";
   protected readonly _agent: Agent;
   private config: EventCollectorConfig;
+  private cryptoPanicApiKey: string;
 
   constructor(apiKeys: Record<string, string>) {
+    this.cryptoPanicApiKey = apiKeys.CRYPTOPANIC_API_KEY;
+    if (!this.cryptoPanicApiKey) {
+      logger.warn("CryptoPanic API key not provided");
+    }
+
     this.config = {
-      minTradeValueUSD: 10000, // $10k minimum to trigger event search
-      timeWindowHours: 24, // Look for events 24h before/after trade
+      minTradeValueUSD: 10,
+      timeWindowHours: 24,
       sources: [
         {
           name: "cryptopanic",
           baseUrl: "https://cryptopanic.com/api/v1/",
-          apiKey: apiKeys.CRYPTOPANIC_API_KEY,
+          apiKey: this.cryptoPanicApiKey,
         },
-        // Add more news sources here
       ],
     };
 
@@ -50,33 +67,53 @@ export class EventCollectorAgent
   }
 
   private async findSignificantTrades(trades: DexTrade[]): Promise<DexTrade[]> {
-    return trades.filter((trade) => {
+    const significantTrades = trades.filter((trade) => {
       const valueUSD = trade.tokenIn.valueUSD || 0;
-      return valueUSD >= this.config.minTradeValueUSD;
+      const isSignificant = valueUSD >= this.config.minTradeValueUSD;
+
+      logger.debug(`Trade value check:`, {
+        txHash: trade.txHash,
+        value: valueUSD,
+        threshold: this.config.minTradeValueUSD,
+        isSignificant,
+      });
+
+      return isSignificant;
     });
+
+    logger.info(
+      `Found ${significantTrades.length} significant trades out of ${trades.length} total`
+    );
+    return significantTrades;
   }
 
   private async searchEvents(trade: DexTrade): Promise<RelatedEvent[]> {
     const events: RelatedEvent[] = [];
     const timeWindow = this.config.timeWindowHours * 60 * 60 * 1000;
 
-    // Search window around trade timestamp
     const startTime = trade.timestamp - timeWindow;
     const endTime = trade.timestamp + timeWindow;
 
+    logger.info(`Searching events for trade`, {
+      txHash: trade.txHash,
+      tokens: [trade.tokenIn.symbol, trade.tokenOut.symbol],
+      timeRange: `${new Date(startTime).toISOString()} to ${new Date(endTime).toISOString()}`,
+    });
+
     for (const source of this.config.sources) {
       try {
-        // Search for events related to tokens in the trade
         const tokens = [trade.tokenIn.symbol, trade.tokenOut.symbol];
-
-        // Here you would implement actual API calls to news sources
-        // This is a placeholder for the actual implementation
         const searchResults = await this.searchNewsSource(
           source,
           tokens,
           startTime,
           endTime
         );
+
+        logger.debug(`Search results from ${source.name}:`, {
+          resultsCount: searchResults.length,
+          tokens,
+        });
 
         events.push(...searchResults);
       } catch (error) {
@@ -96,13 +133,11 @@ export class EventCollectorAgent
     startTime: number,
     endTime: number
   ): Promise<RelatedEvent[]> {
-    // Implement actual API calls here
-    // This is just a placeholder structure
     switch (source.name) {
       case "cryptopanic":
         return this.searchCryptoPanic(tokens, startTime, endTime);
-      // Add more sources as needed
       default:
+        logger.warn(`Unknown news source: ${source.name}`);
         return [];
     }
   }
@@ -112,12 +147,66 @@ export class EventCollectorAgent
     startTime: number,
     endTime: number
   ): Promise<RelatedEvent[]> {
-    // Implement CryptoPanic API call
-    // Return standardized RelatedEvent objects
-    return [];
+    if (!this.cryptoPanicApiKey) {
+      logger.warn("CryptoPanic API key not configured");
+      return [];
+    }
+
+    try {
+      // Convert tokens to standard format (e.g., WETH -> ETH)
+      const normalizedTokens = tokens.map((token) => {
+        if (token === "WETH") return "ETH";
+        if (token === "WBTC") return "BTC";
+        return token;
+      });
+
+      // Convert timestamps to ISO strings
+      const fromDate = new Date(startTime).toISOString();
+      const toDate = new Date(endTime).toISOString();
+
+      const currencyParam = [...new Set(normalizedTokens)].join(",");
+      const url = `https://cryptopanic.com/api/v1/posts/?auth_token=${this.cryptoPanicApiKey}&currencies=${currencyParam}&public=true&filter=important&from=${fromDate}&to=${toDate}`;
+
+      logger.debug("Fetching CryptoPanic news:", {
+        currencies: currencyParam,
+        from: fromDate,
+        to: toDate,
+      });
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`CryptoPanic API error: ${response.statusText}`);
+      }
+
+      const data = (await response.json()) as CryptoPanicResponse;
+      logger.debug(
+        `Received ${data.results?.length || 0} results from CryptoPanic`
+      );
+
+      if (!data.results) {
+        return [];
+      }
+
+      return data.results.map((item) => ({
+        timestamp: new Date(item.published_at).getTime(),
+        source: "cryptopanic",
+        title: item.title,
+        url: item.url,
+        summary: `${item.kind} news from ${item.domain}`,
+        confidence: item.kind === "news" ? 0.8 : 0.6,
+      }));
+    } catch (error) {
+      logger.error("Error fetching CryptoPanic news:", {
+        error: error instanceof Error ? error.message : "Unknown error",
+        tokens,
+      });
+      return [];
+    }
   }
 
   private async storeEvents(events: RelatedEvent[]): Promise<void> {
+    if (events.length === 0) return;
+
     try {
       const operations = events.map((event) => ({
         updateOne: {
@@ -131,10 +220,12 @@ export class EventCollectorAgent
         },
       }));
 
-      if (operations.length > 0) {
-        await RelatedEventModel.bulkWrite(operations);
-        logger.info(`Stored ${operations.length} events`);
-      }
+      const result = await RelatedEventModel.bulkWrite(operations);
+      logger.info(`Stored events:`, {
+        total: operations.length,
+        upserted: result.upsertedCount,
+        modified: result.modifiedCount,
+      });
     } catch (error) {
       logger.error("Failed to store events", {
         error: error instanceof Error ? error.message : "Unknown error",
@@ -146,26 +237,26 @@ export class EventCollectorAgent
     logger.info(`Starting event collection for ${trades.length} trades`);
 
     try {
-      // Find trades worth investigating
       const significantTrades = await this.findSignificantTrades(trades);
-      logger.info(`Found ${significantTrades.length} significant trades`);
-
-      // Collect events for each significant trade
       const allEvents: RelatedEvent[] = [];
 
       for (const trade of significantTrades) {
         const events = await this.searchEvents(trade);
         if (events.length > 0) {
           allEvents.push(...events);
-
-          // Store events as we find them
           await this.storeEvents(events);
-
           logger.info(
             `Found ${events.length} events for trade ${trade.txHash}`
           );
+        } else {
+          logger.debug(`No events found for trade ${trade.txHash}`);
         }
       }
+
+      logger.info(`Event collection completed:`, {
+        tradesProcessed: significantTrades.length,
+        eventsFound: allEvents.length,
+      });
 
       return allEvents;
     } catch (error) {
@@ -175,27 +266,4 @@ export class EventCollectorAgent
       throw error;
     }
   }
-}
-
-// src/agents/event-collector/sources/cryptopanic.ts
-export interface CryptoPanicResponse {
-  results: {
-    kind: string;
-    domain: string;
-    title: string;
-    published_at: string;
-    url: string;
-    currencies: Array<{ code: string; title: string; slug: string }>;
-  }[];
-}
-
-export async function fetchCryptoPanicNews(
-  apiKey: string,
-  currencies: string[],
-  startTime: number,
-  endTime: number
-): Promise<RelatedEvent[]> {
-  // Implement actual API call to CryptoPanic
-  // Convert response to RelatedEvent format
-  return [];
 }

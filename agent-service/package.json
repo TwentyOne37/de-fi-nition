@@ -14,6 +14,7 @@
     "test-store-agent": "ts-node -r tsconfig-paths/register src/scripts/test-store-agent.ts",
     "test-enrichment-agent": "ts-node -r tsconfig-paths/register src/scripts/test-enrichment-agent.ts",
     "test-event-collector-agent": "ts-node -r tsconfig-paths/register src/scripts/test-event-collector-agent.ts",
+    "batch-analysis": "ts-node -r tsconfig-paths/register src/scripts/run-batch-analysis.ts",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write \"src/**/*.ts\""
   },
