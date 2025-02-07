@@ -1,36 +1,41 @@
 // src/index.ts
 import express from "express";
-import cors from "cors";
-import helmet from "helmet";
-import config from "./config";
+import mongoose from "mongoose";
 import logger from "./services/logger";
-import { errorHandler } from "@/middleware/error";
+import { errorHandler } from "./middleware/error";
+import collectionRoutes from "./api/routes/collection.routes";
+import config from "./config";
 
 const app = express();
+const PORT = process.env.PORT || 3000;
 
 // Middleware
-app.use(helmet());
-app.use(cors());
 app.use(express.json());
 
-// Basic health check route
-app.get("/health", (req, res) => {
-  res.status(200).json({ status: "ok" });
-});
+// Routes
+app.use("/api", collectionRoutes);
 
-// Global error handler
+// Error handling
 app.use(errorHandler);
 
-// Start server
-const start = async () => {
-  try {
-    app.listen(config.PORT, () => {
-      logger.info(`Server running on port ${config.PORT}`);
-    });
-  } catch (error) {
-    logger.error("Failed to start server:", error);
-    process.exit(1);
-  }
-};
+// Connect to MongoDB
+mongoose
+  .connect(config.MONGODB_URI)
+  .then(() => {
+    logger.info("Connected to MongoDB");
 
-start();
+    // Start server
+    app.listen(PORT, () => {
+      logger.info(`Server is running on port ${PORT}`);
+    });
+  })
+  .catch((error) => {
+    logger.error("MongoDB connection error:", error);
+    process.exit(1);
+  });
+
+// Handle unhandled promise rejections
+process.on("unhandledRejection", (error) => {
+  logger.error("Unhandled promise rejection:", error);
+  process.exit(1);
+});
